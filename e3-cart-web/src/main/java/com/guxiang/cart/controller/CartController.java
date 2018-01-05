@@ -1,9 +1,11 @@
 package com.guxiang.cart.controller;
 
+import com.guxiang.cart.service.CartService;
 import com.guxiang.common.utils.CookieUtils;
 import com.guxiang.common.utils.E3Result;
 import com.guxiang.common.utils.JsonUtils;
 import com.guxiang.pojo.TbItem;
+import com.guxiang.pojo.TbUser;
 import com.guxiang.service.ItemService;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,9 +39,20 @@ public class CartController {
     @Resource
     private ItemService itemService;
 
+    @Resource
+    private CartService cartService;
+
     @RequestMapping("/cart/add/{itemId}")
     public String addCart(@PathVariable Long itemId, @RequestParam(defaultValue="1")Integer num,
                           HttpServletRequest request, HttpServletResponse response) {
+
+        TbUser user = (TbUser) request.getAttribute("user");
+        //如果是登录状态，把购物车写入redis
+        if (user != null) {
+            //保存到服务端
+            cartService.addCart(user.getId(), itemId, num);
+            return "cartSuccess";
+        }
 
         boolean flag = false;
         //从cookie中取出
@@ -72,14 +85,31 @@ public class CartController {
     @RequestMapping("/cart/cart")
     public String showCatList(HttpServletRequest request, HttpServletResponse response) {
         List<TbItem> cartListFromCookie = getCartListFromCookie(request);
+
+        TbUser user = (TbUser) request.getAttribute("user");
+        if (user != null) {
+            cartService.mergeCart(user.getId(), cartListFromCookie);
+            //把cookie中的购物车删除
+            CookieUtils.deleteCookie(request, response, "cart");
+            //从服务端取购物车列表
+            cartListFromCookie = cartService.getCartList(user.getId());
+        }
         request.setAttribute("cartList",cartListFromCookie);
         return "cart";
     }
+
 
     @RequestMapping("/cart/update/num/{itemId}/{num}")
     @ResponseBody
     public E3Result updateCartNum(@PathVariable Long itemId, @PathVariable Integer num
             , HttpServletRequest request , HttpServletResponse response) {
+
+        TbUser user = (TbUser) request.getAttribute("user");
+        if (user != null) {
+            cartService.updateCartNum(user.getId(), itemId, num);
+            return E3Result.ok();
+        }
+
         List<TbItem> cartListFromCookie = getCartListFromCookie(request);
         for (TbItem tbItem : cartListFromCookie) {
             if (tbItem.getId().longValue()==itemId){
@@ -87,6 +117,7 @@ public class CartController {
                 break;
             }
         }
+
         CookieUtils.setCookie(request,response,"cart",JsonUtils.objectToJson(cartListFromCookie),COOKIE_CART_EXPIRE,true);
         return E3Result.ok();
     }
